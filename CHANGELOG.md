@@ -2,6 +2,78 @@
 
 All notable changes to this project are documented here.
 
+## [0.1.3] - 2026-10-31
+
+v0.1.x 收尾版本。补齐读取隔离、增加诊断入口、明确上游共存处理。
+
+### Added
+
+- **Cross-vault read isolation (P0).** Before this release only writes were
+  guarded. A session belonging to one project could `read` another project's
+  entire vault. Nine read tools are now covered:
+
+  | Tool | Path argument |
+  | --- | --- |
+  | `read` | `file_path` |
+  | `grep` | `path` |
+  | `glob` | `path` |
+  | `obsidian_read` | `path` |
+  | `obsidian_list` | `dir` |
+  | `obsidian_backlinks` | `path` |
+  | `obsidian_frontmatter` | `path` |
+  | `obsidian_search` | *(none — whole vault)* |
+  | `obsidian_tags` | *(none — whole vault)* |
+
+  New deny code `READ_CROSS_VAULT`. `obsidian_search` and `obsidian_tags`
+  take no path argument but return vault-wide results, so the whole call is
+  denied when the vault belongs to another project.
+
+  Reads of paths outside every registered vault are unaffected — ordinary
+  source files, configs, and logs stay readable.
+
+- **`knowledge_hub_status` diagnostic tool (P1).** A read-only tool that reports
+  registry validity, project count, current cwd match, per-vault existence,
+  whether the guard is registered, the protected tool range split into read and
+  write, pipeline availability, last sync status, and upstream coexistence.
+  Anything it cannot determine is reported as `unknown` — never fabricated as
+  success. Backed by `diagnostics.mjs` (`collectDiagnostics` /
+  `formatDiagnostics`), which is a pure function testable without the DSH
+  runtime.
+
+- **`describeProtectedTools()`** exported from `guard.mjs` so the diagnostic
+  entry and the implementation cannot drift into two separate tool lists.
+
+- **Upstream coexistence handling (P2).** `coexistence.mjs` detects a
+  simultaneously loaded `dsh-llm-wiki` and reports the concrete conflicts:
+  duplicate prompt injection, duplicate pipeline sync, overlapping project
+  context, and load-order sensitivity. It names `dsh-knowledge-hub` as the sole
+  owner of both prompt injection and pipeline sync, and states explicitly that
+  the hub keeps running — coexistence never disables it. The recommendation is
+  actionable (disable one entry in the profile patch) rather than a bare warning.
+
+### Changed
+
+- `READONLY_PROJECT` now blocks writes only. A `readonly` project can still be
+  read; the flag means "do not modify", not "do not look".
+
+### Tests
+
+59 cases across four suites, all passing:
+
+| Suite | Cases | Covers |
+| --- | --- | --- |
+| `obsidian-relpath.test.mjs` | 12 | relative-path write isolation (v0.1.2 regression) |
+| `read-isolation.test.mjs` | 21 | read isolation, traversal, symlink, fail-closed |
+| `diagnostics.test.mjs` | 18 | diagnostic output, honesty about unknown state, tool wiring |
+| `coexistence.test.mjs` | 8 | upstream conflict detection and responsibility assignment |
+
+### Note
+
+The standing caveat is unchanged: **the guard prevents mistakes and ordinary
+overreach — it is not a security boundary against deliberate bypass.** Read
+isolation follows the same rule. It stops accidental cross-project reads; it does
+not claim to stop a determined actor with filesystem access.
+
 ## [0.1.2] - 2026-10-31
 
 ### Fixed

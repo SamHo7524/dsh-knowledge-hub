@@ -52,6 +52,21 @@ import { spawn } from "node:child_process";
 // A 阶段：workspace 匹配统一由注册表模块提供，本文件不再保留独立实现。
 // 两层（Prompt / Guard）共用同一份路径语义，避免「提示词说 A、守卫判 B」。
 import { loadProjects, matchProject } from "./projects-registry.mjs";
+// 诊断入口：只读收集运行状态，供 knowledge_hub_status 工具使用。
+import { collectDiagnostics, formatDiagnostics } from "./diagnostics.mjs";
+// defineTool 由 DSH 运行时提供（@deepseek-ai/dsh-tools）。测试环境没有该包，
+// 因此延迟到真正注册时再解析；拿不到就跳过工具注册，不影响 Prompt 层。
+let defineToolCached;
+async function resolveDefineTool() {
+  if (defineToolCached !== undefined) return defineToolCached;
+  try {
+    const mod = await import("@deepseek-ai/dsh-tools");
+    defineToolCached = mod.defineTool;
+  } catch {
+    defineToolCached = null;
+  }
+  return defineToolCached;
+}
 
 export const name = "dsh-llm-wiki";
 export const inject = ["systemPrompt"];
@@ -354,6 +369,29 @@ export function apply(ctx, config = {}) {
   // 每个会话只记一次提示词匹配结果，避免刷屏
   const lastPromptKey = new Map();
 
+  // 诊断用：Guard 是否应当处于注册状态。
+  // Guard 在独立 entry（dsh-knowledge-hub/guard）里注册，本 entry 无法查询其状态，
+  // 因此由 profile 配置显式声明（guardEnabled），默认视为启用（0.1.1 起默认开启）。
+  const guardExpected = config.guardEnabled !== false;
+
+  // 诊断用：检测上游 dsh-llm-wiki 是否与本插件共存。
+  // 判据：profile 的 node_modules 里存在 dsh-llm-wiki 包。
+  const detectUpstream = () => {
+    try {
+      const profileDir = dirname(dirname(DSH_HOME));
+      const candidates = [
+        join(DSH_HOME, "profiles"),
+      ];
+      for (const base of candidates) {
+        if (!existsSync(base)) continue;
+        for (const prof of readdirSync(base)) {
+          if (existsSync(join(base, prof, "node_modules", "dsh-llm-wiki", "package.json"))) return true;
+        }
+      }
+      return existsSync(join(profileDir, "node_modules", "dsh-llm-wiki", "package.json"));
+    } catch { return false; }
+  };
+
   if (multi) {
     ctx.effect(() => ctx.systemPrompt.section({
       name: "llm-wiki:preview",
@@ -537,4 +575,57 @@ export function apply(ctx, config = {}) {
       runPipeline(target);
     } catch (e) { log("hook error: " + e.message); }
   });
+
+  // ── 诊断工具：一条命令看清运行状态 ──
+  //
+  // 只读、无副作用。Guard 是否注册由 config 注入（Guard 在独立 entry 里，
+  // 本 entry 无法直接查询其注册状态，因此由 profile 配置显式声明）。
+  if (ctx.tools && typeof ctx.tools.register === "function") {
+    const buildStatusText = () => {
+      const d = collectDiagnostics({
+        projectsFile,
+        cwd: (ctx.agent && ctx.agent.session && ctx.agent.session.header
+          && ctx.agent.session.header.cwd) || process.cwd(),
+        guardRegistered: guardExpected === true,
+        upstreamPresent: detectUpstream(),
+        obsidianVaultPath: config.obsidianVaultPath ? String(config.obsidianVaultPath) : "",
+        pipeline: {
+          available: existsSync(PIPELINE),
+          scriptPath: PIPELINE,
+          lastSyncStatus: "unknown",
+          note: "会话结束时由本插件触发增量同步；此处不读取历史同步记录",
+        },
+      });
+      return formatDiagnostics(d);
+    };
+
+    const definition = {
+      name: "knowledge_hub_status",
+      description:
+        "诊断 dsh-knowledge-hub 的运行状态：注册表是否有效、当前 cwd 匹配哪个项目、" +
+        "各 Vault 是否存在、Guard 是否注册及其读写保护范围、Pipeline 是否可用、" +
+        "是否检测到上游 dsh-llm-wiki 共存。只读操作，不修改任何文件。",
+      parameters: {
+        verbose: {
+          type: "boolean",
+          description: "是否输出完整项目列表与告警详情（默认 false）。",
+        },
+      },
+      output: {
+        schema: { type: "string" },
+        render: (_args, value) => [{ type: "text", text: value }],
+      },
+      execute: () => buildStatusText(),
+    };
+
+    // defineTool 可用时用它规范化定义；拿不到时退回裸定义（DSH 同样接受）。
+    resolveDefineTool()
+      .then((defineTool) => {
+        const tool = typeof defineTool === "function" ? defineTool(definition) : definition;
+        try { ctx.tools.register(tool, "dsh-llm-wiki.tool.status"); } catch { /* 注册失败不影响主流程 */ }
+      })
+      .catch(() => {
+        try { ctx.tools.register(definition, "dsh-llm-wiki.tool.status"); } catch { /* 同上 */ }
+      });
+  }
 }

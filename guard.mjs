@@ -28,18 +28,37 @@ const WRITE_TOOLS = {
 };
 
 /**
- * 使用「相对 Vault 根」路径语义的工具。
+ * 读取类工具 → 需检查的路径参数名。
+ *
+ * 空数组表示「没有路径参数，作用于整个 Vault」——`obsidian_search` 与
+ * `obsidian_tags` 属于此类：它们不接受路径，但会把整个 Vault 的内容
+ * 或标签全量返回。若该 Vault 属于其他项目，整次调用都必须拒绝。
+ *
+ * 为什么读取也要管：写入保护只防「改坏」，不防「看光」。会话属于 A 项目时
+ * 直接 read 出 B 项目整个知识库，是同一类跨库越界。
+ */
+const READ_TOOLS = {
+  read: ["file_path"],
+  grep: ["path"],
+  glob: ["path"],
+  obsidian_read: ["path"],
+  obsidian_list: ["dir"],
+  obsidian_backlinks: ["path"],
+  obsidian_frontmatter: ["path"],
+  obsidian_search: [],      // 无路径参数：搜索范围 = 整个 Vault
+  obsidian_tags: [],        // 无路径参数：枚举整个 Vault 的标签
+};
+
+/**
+ * 路径语义以 Vault 根为基准的工具（全部 Obsidian 工具）。
  *
  * 为什么必须区分：这些工具的 path 参数由 dsh-obsidian 的 guardPath 解析，
  * 即 path.resolve(vaultRoot, rel)，基准是 Vault 根而非 process.cwd()。
- * 若 Guard 仍按 cwd 解析，跨库写入会被判成「非知识库路径」而放行（实测可复现）。
+ * 若 Guard 仍按 cwd 解析，跨库写入/读取会被判成「非知识库路径」而放行（实测可复现）。
  */
-const VAULT_RELATIVE_TOOLS = new Set([
-  "obsidian_write",
-  "obsidian_append",
-  "obsidian_move",
-  "obsidian_delete",
-  "obsidian_set_property",
+const VAULT_SCOPED_TOOLS = new Set([
+  ...Object.keys(WRITE_TOOLS).filter((k) => k.startsWith("obsidian_")),
+  ...Object.keys(READ_TOOLS).filter((k) => k.startsWith("obsidian_")),
 ]);
 
 /** 相对路径是否试图穿越出基准目录 */
@@ -48,6 +67,17 @@ const escapesBase = (rel) => {
   const norm = rel.replace(/\\/g, "/");
   return norm === ".." || norm.startsWith("../") || norm.includes("/../") || norm.endsWith("/..");
 };
+
+/**
+ * 报告 Guard 实际保护的工具范围，读写分开。
+ * 供诊断入口使用，避免诊断与实现各写一份清单而漂移。
+ */
+export function describeProtectedTools() {
+  return {
+    write: Object.keys(WRITE_TOOLS),
+    read: Object.keys(READ_TOOLS),
+  };
+}
 
 /**
  * 规范化「写入目标」：解析符号链接（共享实现）。
@@ -213,8 +243,8 @@ const isAbsoluteTarget = (p) => {
 };
 
 /**
- * 用项目注册表做写入决策（每次调用重新加载，保证配置变更立即可见）。
- * 配置损坏时 fail-closed：拒绝写入任何已登记 vault。
+ * 用项目注册表做读写决策（每次调用重新加载，保证配置变更立即可见）。
+ * 配置损坏时 fail-closed：拒绝访问任何已登记 vault。
  *
  * @param {object} exec 工具执行上下文
  * @param {string} projectsFile 注册表路径
@@ -224,24 +254,31 @@ const isAbsoluteTarget = (p) => {
  */
 export function decideWithRegistry(exec, projectsFile, opts = {}) {
   const tool = exec && exec.name;
-  const argNames = WRITE_TOOLS[tool];
-  if (!argNames) return { action: "allow" };          // 非写入工具
+
+  const writeArgs = WRITE_TOOLS[tool];
+  const readArgs = READ_TOOLS[tool];
+  const isWrite = Array.isArray(writeArgs);
+  const isRead = !isWrite && Array.isArray(readArgs);
+  if (!isWrite && !isRead) return { action: "allow" };   // 与路径无关的工具
+
+  const argNames = isWrite ? writeArgs : readArgs;
+  const verb = isWrite ? "写入" : "读取";
+  const crossCode = isWrite ? "CROSS_VAULT_WRITE" : "READ_CROSS_VAULT";
 
   const args = (exec && exec.arguments) || {};
   const rawTargets = argNames.map((k) => args[k]).filter((v) => typeof v === "string" && v.length > 0);
-  if (rawTargets.length === 0) return { action: "allow" };
 
   const cwd = exec && exec.agent && exec.agent.session && exec.agent.session.header
     ? exec.agent.session.header.cwd : "";
 
-  // ── obsidian_* 的相对路径基准是 Vault 根，不是 process.cwd() ──
+  // ── Obsidian 工具的路径基准是 Vault 根，不是 process.cwd() ──
   //
   // 必须显式解析：obsidian 的 guardPath 用 path.resolve(vaultRoot, rel)，
-  // 若此处仍按 cwd 解析，跨库写入会被判成「非知识库路径」而放行（实测可复现）。
-  const vaultRelative = VAULT_RELATIVE_TOOLS.has(tool);
+  // 若此处仍按 cwd 解析，跨库访问会被判成「非知识库路径」而放行（实测可复现）。
+  const vaultScoped = VAULT_SCOPED_TOOLS.has(tool);
   const hasRelative = rawTargets.some((t) => !isAbsoluteTarget(t));
   let obsidianRoot = null;
-  if (vaultRelative && hasRelative) {
+  if (vaultScoped && (hasRelative || rawTargets.length === 0)) {
     obsidianRoot = opts.obsidianVaultRoot
       ? resolvePath(opts.obsidianVaultRoot)
       : detectObsidianVaultRoot({ configVaultPath: opts.obsidianVaultPath });
@@ -250,13 +287,13 @@ export function decideWithRegistry(exec, projectsFile, opts = {}) {
   // 预解析每个待检查目标为「绝对路径」；相对路径无法定基准时 fail-closed
   const targets = [];
   for (const rawTarget of rawTargets) {
-    if (vaultRelative && !isAbsoluteTarget(rawTarget)) {
+    if (vaultScoped && !isAbsoluteTarget(rawTarget)) {
       // 相对路径试图穿越出 vault 根：真实落点不可信，直接拒绝
       if (escapesBase(rawTarget)) {
         return {
           action: "deny",
           code: "VAULT_ESCAPE",
-          reason: "知识库写入被拒绝：路径「" + rawTarget + "」穿越出 Vault 根，" +
+          reason: "知识库" + verb + "被拒绝：路径「" + rawTarget + "」穿越出 Vault 根，" +
             "实际落点无法确认。请改用 Vault 内的相对路径。",
           detail: { tool, target: rawTarget, cwd: cwd || "(empty)" },
         };
@@ -265,7 +302,7 @@ export function decideWithRegistry(exec, projectsFile, opts = {}) {
         return {
           action: "deny",
           code: "VAULT_ROOT_UNKNOWN",
-          reason: "知识库写入被拒绝：无法确定 dsh-obsidian 的 Vault 根，" +
+          reason: "知识库" + verb + "被拒绝：无法确定 dsh-obsidian 的 Vault 根，" +
             "因此无法确认相对路径「" + rawTarget + "」的真实归属。" +
             "请在 dsh-obsidian 配置中显式设置 vaultPath，或改用绝对路径。",
           detail: { tool, target: rawTarget, cwd: cwd || "(empty)" },
@@ -277,9 +314,24 @@ export function decideWithRegistry(exec, projectsFile, opts = {}) {
     targets.push({ raw: rawTarget, check: rawTarget });
   }
 
+  // 无路径参数但作用于整个 Vault 的工具（obsidian_search / obsidian_tags）：
+  // 检查目标就是这个 Vault 根本身。
+  if (vaultScoped && targets.length === 0) {
+    if (!obsidianRoot) {
+      return {
+        action: "deny",
+        code: "VAULT_ROOT_UNKNOWN",
+        reason: "知识库" + verb + "被拒绝：无法确定 dsh-obsidian 的 Vault 根，" +
+          "因此无法确认「" + tool + "」的作用范围。请显式设置 vaultPath。",
+        detail: { tool, target: "(whole vault)", cwd: cwd || "(empty)" },
+      };
+    }
+    targets.push({ raw: "(whole vault)", check: obsidianRoot });
+  }
+
   const reg = loadProjects({ projectsFile });
 
-  // 配置无效：fail-closed —— 只对「已登记 vault 的写入」拒绝，其他路径不受影响
+  // 配置无效：fail-closed —— 只对「已登记 vault 的访问」拒绝，其他路径不受影响
   if (!reg.ok) {
     const known = reg.lastGood || [];
     for (const { raw, check } of targets) {
@@ -288,7 +340,7 @@ export function decideWithRegistry(exec, projectsFile, opts = {}) {
         return {
           action: "deny",
           code: "REGISTRY_INVALID",
-          reason: "知识库写入被拒绝：项目注册表无效（" + (reg.error || "未知错误") +
+          reason: "知识库" + verb + "被拒绝：项目注册表无效（" + (reg.error || "未知错误") +
             "），无法确认「" + raw + "」的归属。请修复 " + projectsFile,
           detail: { tool, target: raw, owner: owner.id, error: reg.error },
         };
@@ -307,7 +359,7 @@ export function decideWithRegistry(exec, projectsFile, opts = {}) {
       return {
         action: "deny",
         code: "UNC_UNMAPPABLE",
-        reason: "知识库写入被拒绝：UNC 路径「" + rawTarget + "」无法映射到本地盘符，" +
+        reason: "知识库" + verb + "被拒绝：UNC 路径「" + rawTarget + "」无法映射到本地盘符，" +
           "无法确认其归属。请改用盘符路径（如 K:\\...）重试。",
         detail: { tool, target: rawTarget, cwd: cwd || "(empty)" },
       };
@@ -320,7 +372,7 @@ export function decideWithRegistry(exec, projectsFile, opts = {}) {
       return {
         action: "deny",
         code: "UNREGISTERED_WORKSPACE",
-        reason: "知识库写入被拒绝：当前工作区未登记任何项目（目标：" + rawTarget + "）",
+        reason: "知识库" + verb + "被拒绝：当前工作区未登记任何项目（目标：" + rawTarget + "）",
         detail: { tool, target: rawTarget, owner: owner.id, cwd: cwd || "(empty)" },
       };
     }
@@ -328,14 +380,15 @@ export function decideWithRegistry(exec, projectsFile, opts = {}) {
     if (owner.id !== current.id) {
       return {
         action: "deny",
-        code: "CROSS_VAULT_WRITE",
-        reason: "跨库写入被拒绝：目标属于项目「" + owner.name + "」，当前会话属于「" +
+        code: crossCode,
+        reason: "跨库" + verb + "被拒绝：目标属于项目「" + owner.name + "」，当前会话属于「" +
           current.name + "」。如需操作其他项目，请切换工作区开新会话。",
         detail: { tool, target: rawTarget, owner: owner.id, current: current.id, cwd: cwd || "(empty)" },
       };
     }
 
-    if (current.status === "readonly") {
+    // 只读项目：禁止写入，但允许读取（readonly 的语义是「不许改」）
+    if (isWrite && current.status === "readonly") {
       return {
         action: "deny",
         code: "READONLY_PROJECT",

@@ -1,6 +1,6 @@
 {
   "name": "dsh-knowledge-hub",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "DSH knowledge-base hub: multi-project registry, prompt context injection, and write-path guard.",
   "type": "module",
   "exports": {
@@ -12,6 +12,8 @@
     "prompt.mjs",
     "guard.mjs",
     "projects-registry.mjs",
+    "diagnostics.mjs",
+    "coexistence.mjs",
     "cordis.patch.yml",
     "LICENSE",
     "THIRD_PARTY_NOTICES.md",
