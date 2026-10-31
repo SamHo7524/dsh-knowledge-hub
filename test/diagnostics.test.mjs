@@ -282,6 +282,20 @@ test("诊断：collectDiagnostics 不修改注册表文件", () => {
 // 工具接入：prompt.mjs 必须注册诊断工具
 // ══════════════════════════════════════════════════════════
 
+test("inject 必须声明 tools 服务，否则 ctx.tools 在 apply() 时不可用", async () => {
+  const mod = await import("../prompt.mjs");
+  const inject = mod.inject || [];
+  assert.ok(inject.includes("tools"),
+    "inject 必须含 \"tools\"（dsh-obsidian/dsh-github 均如此），实际: [" + inject.join(", ") + "]");
+});
+
+test("inject 必须保留 systemPrompt 服务（提示词注入依赖）", async () => {
+  const mod = await import("../prompt.mjs");
+  const inject = mod.inject || [];
+  assert.ok(inject.includes("systemPrompt"),
+    "inject 必须保留 \"systemPrompt\"，实际: [" + inject.join(", ") + "]");
+});
+
 test("prompt.apply() 必须注册 knowledge_hub_status 工具", async () => {
   const f = makeFixture();
   try {

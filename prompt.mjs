@@ -61,7 +61,10 @@ import { collectDiagnostics, formatDiagnostics } from "./diagnostics.mjs";
 import { defineTool } from "@deepseek-ai/dsh-tools";
 
 export const name = "dsh-llm-wiki";
-export const inject = ["systemPrompt"];
+// Cordis 的 inject 是服务依赖声明：未声明 tools 时，apply() 执行期间
+// ctx.tools 是 undefined，注册会被静默跳过。dsh-obsidian 与 dsh-github
+// 都声明了 "tools"。曾漏掉这一项，导致 knowledge_hub_status 从未注册。
+export const inject = ["systemPrompt", "tools"];
 
 const DSH_HOME = process.env.DSH_HOME || join(process.env.USERPROFILE || homedir(), ".dsh");
 const DEFAULT_VAULT = process.platform === "win32"

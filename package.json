@@ -1,6 +1,6 @@
 {
   "name": "dsh-knowledge-hub",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "DSH knowledge-base hub: multi-project registry, prompt context injection, and write-path guard.",
   "type": "module",
   "exports": {
