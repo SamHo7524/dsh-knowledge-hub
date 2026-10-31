@@ -13,6 +13,24 @@
 
 DSH（DeepSeek Harness）知识库中枢插件：多项目注册表、每轮项目上下文注入、写入路径守卫。
 
+### 设计定位
+
+**面向 Obsidian vault 设计，同时也适用于任意「目录 + Markdown」结构的知识库。**
+
+本插件的设计初衷是三件事的结合：
+
+| 组成 | 作用 |
+|---|---|
+| **Obsidian** | 知识库以 Obsidian vault 的形态存在——纯 Markdown 文件 + 目录结构，可直接用 Obsidian 打开浏览与编辑 |
+| **LLM-Wiki** | 知识按 Karpathy 的 LLM-Wiki 模式组织：`schema.md` 守则 + `wiki/` 分类目录 + `index.md` 导航，由 AI 维护、由管线同步 |
+| **多库管理** | 一个 DSH 实例同时服务多个项目，每个项目有独立 vault，按会话 `cwd` 自动识别、按注册表隔离写入 |
+
+三者叠加才有意义：**没有 Obsidian**，知识库缺少人可读可编辑的界面；**没有 LLM-Wiki**，AI 写入的是一堆无结构文件；**没有多库隔离**，多个项目会互相污染。
+
+> 实现上并不绑定 Obsidian：核心逻辑只读写普通 Markdown 文件（`schema.md`、`wiki/index.md`）。
+> `obsidian_*` 系列工具是**可选的额外保护对象**——装了 `dsh-obsidian` 时守卫会一并保护这些写入路径，
+> 没装时自动跳过。因此不用 Obsidian 也能运行，只是少了那部分便利。
+
 **版本 0.1.0** · MIT 许可 · Copyright (c) 2026 SamBanHo
 
 ---
@@ -132,19 +150,19 @@ npm install --prefix $profileDir "github:SamHo7524/dsh-knowledge-hub#<commit-sha
 
     - id: wiki-guard
       name: dsh-knowledge-hub/guard
-      disabled: true          # 守卫默认关闭，需显式开启
       config:
         projectsFile: "C:/Users/you/.dsh/llm-wiki/dsh-projects.json"
         logFile: "C:/Users/you/.dsh/llm-wiki/guard.log"
 ```
 
-### ⚠️ 三个必须注意的点
+### ⚠️ 两个必须注意的点
 
 | 注意点 | 说明 |
 |---|---|
 | **路径用正斜杠** | YAML 中反斜杠可能构成非法转义（如 `\guard.log` 里的 `\g`），会导致 patch 静默失效 |
 | **`projectsFile` 必须配** | 不配则 `apply()` 会执行但提前 return，**守卫不会注册** |
-| **守卫默认 `disabled: true`** | 需显式改为 `false` 才启用 |
+
+> 守卫**默认启用**——装上插件即生效，无需额外操作。详见[启用守卫](#启用守卫)。
 
 ---
 
@@ -210,12 +228,16 @@ DSH 文件沙箱（`workspace-write`）会**先于守卫**拦截工作区外的�
 
 ## 启用守卫
 
-守卫 entry 默认 `disabled: true`。在 profile patch 中覆盖：
+守卫 entry **默认启用**——装上插件即生效，无需额外操作。
+
+如果只想先验证 Prompt 层、暂时关闭守卫，在 profile patch 中覆盖：
 
 ```yaml
 - id: wiki-guard
-  disabled: false
+  disabled: true
 ```
+
+关闭后日志中不会出现注册记录——参见[验证安装](#验证安装)的检查 3。
 
 ### 守卫拦截什么
 

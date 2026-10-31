@@ -13,6 +13,29 @@
 DSH (DeepSeek Harness) knowledge-base hub plugin: multi-project registry,
 per-turn project-context prompt injection, and write-path guard.
 
+### Design intent
+
+**Built for Obsidian vaults, and usable with any "directory + Markdown"
+knowledge base.**
+
+The plugin combines three things:
+
+| Component | Role |
+|---|---|
+| **Obsidian** | The knowledge base takes the shape of an Obsidian vault — plain Markdown files in a directory tree, openable and editable directly in Obsidian |
+| **LLM-Wiki** | Knowledge is organized following Karpathy's LLM-Wiki pattern: `schema.md` rules + categorized `wiki/` directories + `index.md` navigation, maintained by AI and synced by a pipeline |
+| **Multi-vault management** | One DSH instance serves several projects, each with its own vault, selected by session `cwd` and isolated by a registry |
+
+All three matter together: without Obsidian the vault lacks a human-readable
+editing surface; without LLM-Wiki the AI writes unstructured files; without
+multi-vault isolation the projects contaminate each other.
+
+> The implementation does not hard-depend on Obsidian: the core logic only reads
+> and writes ordinary Markdown (`schema.md`, `wiki/index.md`). The `obsidian_*`
+> tools are **optional extra protection targets** — when `dsh-obsidian` is
+> installed the guard also covers those write paths, and skips them otherwise.
+> So it runs without Obsidian, just with fewer conveniences.
+
 **Version 0.1.0** · MIT License · Copyright (c) 2026 SamBanHo
 
 ## Compatibility
@@ -88,7 +111,6 @@ Then create `cordis.patch.yml` in the profile directory:
 
     - id: wiki-guard
       name: dsh-knowledge-hub/guard
-      disabled: true          # guard ships disabled; enable explicitly
       config:
         projectsFile: "C:/Users/you/.dsh/llm-wiki/dsh-projects.json"
         logFile: "C:/Users/you/.dsh/llm-wiki/guard.log"
@@ -151,14 +173,21 @@ Put the vault inside the workspace, or widen the sandbox deliberately:
 <workspace>/vault/          <- vault inside workspace: guard is the effective layer
 ```
 
-## Enabling the guard
+## Guard behavior
 
-The guard entry ships with `disabled: true`. Override it in the profile patch:
+The guard entry is **enabled by default**. Installing the plugin is enough to
+activate write-path protection; no extra step is required.
+
+To disable it (for example while first validating the prompt layer only),
+override the row in the profile patch:
 
 ```yaml
 - id: wiki-guard
-  disabled: false
+  disabled: true
 ```
+
+When disabled, no registration line appears in the log — see
+**Verifying the installation**, Check 3.
 
 > **Security scope.** The guard is intended to prevent accidental writes and
 > ordinary boundary crossings. It is **not** a defense against deliberate
@@ -230,7 +259,7 @@ claim the protection chain is active without this line.
   knowledge-base context into the system prompt on every turn, driven by a
   single JSON project registry.
 - **Guard layer** (`dsh-knowledge-hub/guard`) — registers a tool guard that
-  rejects cross-vault writes. **Disabled by default.**
+  rejects cross-vault writes. **Enabled by default.**
 
 ## Acknowledgements and References
 

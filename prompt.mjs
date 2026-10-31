@@ -86,7 +86,7 @@ function cached(file, ttl = CACHE_TTL) {
 const LOG_FILE = join(HINT_DIR, "plugin.log");
 let logReady = false;
 const log = (msg) => {
-  const line = "[dsh-llm-wiki] " + new Date().toISOString() + " pid=" + process.pid + " " + msg;
+  const line = "[dsh-knowledge-hub] " + new Date().toISOString() + " pid=" + process.pid + " " + msg;
   try { console.log(line); } catch {}
   try {
     if (!logReady) { mkdirSync(HINT_DIR, { recursive: true }); logReady = true; }

@@ -2,6 +2,37 @@
 
 All notable changes to this project are documented here.
 
+## [0.1.1] - 2026-10-31
+
+### Changed
+
+- **Guard is now enabled by default.** Previously the entry shipped with
+  `disabled: true` and required an explicit opt-in. Installing the plugin now
+  activates write-path protection without extra configuration. To turn it off,
+  override the row in the profile patch:
+
+  ```yaml
+  - id: wiki-guard
+    disabled: true
+  ```
+
+- **Log prefix changed** from `[dsh-llm-wiki]` to `[dsh-knowledge-hub]`. The old
+  prefix was carried over from the upstream project and made it ambiguous which
+  plugin a log line came from. Grep for the new prefix when reading
+  `plugin.log`.
+
+### Added
+
+- **Design intent section** in both READMEs, stating the plugin is built for
+  Obsidian vaults following the LLM-Wiki pattern with multi-vault management,
+  while remaining usable with any "directory + Markdown" knowledge base.
+
+### Migration
+
+If you are upgrading from 0.1.0 and had explicitly set `disabled: false`, that
+setting still works — it is now simply the default. If you relied on the guard
+being off, add `disabled: true` to keep the previous behavior.
+
 ## [0.1.0] - 2026-10-31
 
 Initial release.
