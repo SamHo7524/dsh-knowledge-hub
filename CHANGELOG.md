@@ -2,6 +2,54 @@
 
 All notable changes to this project are documented here.
 
+## [0.1.2] - 2026-10-31
+
+### Fixed
+
+- **Cross-vault write bypass via `obsidian_*` relative paths.** The `obsidian_*`
+  tools from `dsh-obsidian` resolve their `path` argument against the **vault
+  root** (`path.resolve(vaultRoot, rel)`), while the guard resolved relative
+  paths against `process.cwd()`. The two disagree, so
+  `obsidian_write({ path: "note.md" })` was classified as "not inside any
+  knowledge base" and **allowed**, even though it actually wrote into another
+  project's vault. Verified end to end: writing into a different project's vault
+  from a session belonging to another project succeeded and left no `DENY` line
+  in `guard.log`.
+
+  The guard now resolves relative paths for `obsidian_*` tools against the
+  Obsidian vault root, using the same resolution order as `dsh-obsidian`:
+  explicit `vaultPath` config first, then auto-detection from the Obsidian app
+  config (`obsidian.json`, preferring the currently open vault).
+
+  Three new deny codes:
+
+  | Code | Meaning |
+  | --- | --- |
+  | `VAULT_ROOT_UNKNOWN` | Relative path used, but the vault root cannot be determined → fail-closed |
+  | `VAULT_ESCAPE` | Relative path climbs out of the vault root (`../`) → fail-closed |
+  | `CROSS_VAULT_WRITE` | (existing) Resolved target belongs to another project |
+
+- **`apply()` now forwards `obsidianVaultPath`** from plugin config to the
+  decision layer. Without it the guard would have to rely on auto-detection
+  alone.
+
+### Added
+
+- **`detectObsidianVaultRoot()`** in `projects-registry.mjs`, mirroring
+  `dsh-obsidian`'s `appConfigCandidates` / `detectVaultRootFromAppConfig`
+  behavior so both layers agree on the vault root.
+
+- **Test suite** (`test/obsidian-relpath.test.mjs`, 12 cases) covering
+  relative-path cross-vault denial for all five `obsidian_*` write tools,
+  fail-closed when the vault root is unknown, `../` escape rejection, and
+  non-regression of absolute-path and non-vault behavior.
+
+### Note
+
+This closes a real protection gap, not a cosmetic one. It does not change the
+standing caveat: the guard is meant to prevent mistakes and ordinary
+overreach — it is not a security boundary against deliberate bypass.
+
 ## [0.1.1] - 2026-10-31
 
 ### Changed

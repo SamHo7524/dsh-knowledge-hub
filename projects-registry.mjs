@@ -324,3 +324,61 @@ export function findVaultOwner(targetPath, projects) {
 
 /** 导出给 guard 判断是否需要 fail-closed */
 export { isUnmappableUnc };
+
+/**
+ * 探测 dsh-obsidian 实际使用的 Vault 根。
+ *
+ * 为什么 Guard 必须知道这个：`obsidian_*` 工具的 path 参数是「相对 Vault 根」
+ * 的路径（见 dsh-obsidian 的 guardPath: path.resolve(vaultRoot, rel)），
+ * 而 Guard 的 resolvePath 基于 process.cwd()。两者语义不同 →
+ * 「obsidian_write({path:"x.md"})」会被判成 cwd 下的非知识库路径而放行，
+ * 实际却写进了他库 Vault。实测确有此绕过。
+ *
+ * 解析顺序与 dsh-obsidian 的 resolveVaultRoot 保持一致：
+ *   1. 显式配置的 vaultPath（最高优先，与插件一致）
+ *   2. Obsidian 应用配置里「当前打开的 vault」→ 自动探测
+ * 两者都拿不到时返回 null，由调用方 fail-closed。
+ *
+ * @param {object} opts
+ * @param {string} [opts.configVaultPath] dsh-obsidian 的 vaultPath 配置
+ * @returns {string|null} 归一化后的 vault 根（小写、已解析符号链接），或 null
+ */
+export function detectObsidianVaultRoot({ configVaultPath } = {}) {
+  if (configVaultPath && typeof configVaultPath === "string" && configVaultPath.trim()) {
+    return resolvePath(configVaultPath) || null;
+  }
+
+  // 与 dsh-obsidian 的 appConfigCandidates 保持同一候选顺序
+  const home = process.env.USERPROFILE || process.env.HOME || "";
+  const appData = process.env.APPDATA || "";
+  const candidates = [];
+  if (process.platform === "win32") {
+    if (appData) candidates.push(join(appData, "obsidian", "obsidian.json"));
+    if (home) {
+      candidates.push(join(home, ".config", "obsidian", "obsidian.json"));
+      candidates.push(join(home, "Library", "Application Support", "obsidian", "obsidian.json"));
+    }
+  } else if (process.platform === "darwin") {
+    if (home) candidates.push(join(home, "Library", "Application Support", "obsidian", "obsidian.json"));
+    if (appData) candidates.push(join(appData, "obsidian", "obsidian.json"));
+    if (home) candidates.push(join(home, ".config", "obsidian", "obsidian.json"));
+  } else {
+    if (home) candidates.push(join(home, ".config", "obsidian", "obsidian.json"));
+    if (appData) candidates.push(join(appData, "obsidian", "obsidian.json"));
+    if (home) candidates.push(join(home, "Library", "Application Support", "obsidian", "obsidian.json"));
+  }
+
+  for (const file of candidates) {
+    try {
+      const cfg = JSON.parse(readFileSync(file, "utf8"));
+      const entries = Object.values(cfg.vaults || {});
+      // 与 dsh-obsidian 相同：优先「当前打开的」，否则取第一个
+      const found = entries.find((v) => v && v.open) || entries[0];
+      if (found && typeof found.path === "string" && found.path.trim()) {
+        const resolved = resolvePath(found.path);
+        if (resolved) return resolved;
+      }
+    } catch { /* 该候选不可用，继续下一个 */ }
+  }
+  return null;
+}
