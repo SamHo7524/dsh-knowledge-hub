@@ -1,0 +1,6 @@
+- insert:
+    - id: llm-wiki
+      name: dsh-knowledge-hub
+    - id: wiki-guard
+      name: dsh-knowledge-hub/guard
+      disabled: true

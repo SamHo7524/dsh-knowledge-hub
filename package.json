@@ -1,0 +1,44 @@
+{
+  "name": "dsh-knowledge-hub",
+  "version": "0.1.0",
+  "description": "DSH knowledge-base hub: multi-project registry, prompt context injection, and write-path guard.",
+  "type": "module",
+  "exports": {
+    ".": "./prompt.mjs",
+    "./guard": "./guard.mjs",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "prompt.mjs",
+    "guard.mjs",
+    "projects-registry.mjs",
+    "cordis.patch.yml",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "README.md"
+  ],
+  "license": "MIT",
+  "author": "SamBanHo",
+  "contributors": [
+    {
+      "name": "iwtown",
+      "url": "https://github.com/iwtown/dsh-llm-wiki"
+    }
+  ],
+  "keywords": [
+    "deepseek-harness",
+    "dsh-plugin",
+    "llm-wiki",
+    "knowledge-base",
+    "multi-project"
+  ],
+  "engines": {
+    "node": ">=22.5.0",
+    "dsh": ">=0.2.0-rc.2 <0.2.1-0 || >=0.2.1-rc.1 <0.3.0-0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

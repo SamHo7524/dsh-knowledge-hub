@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+pnpm-lock.yaml
+package-lock.json
+yarn.lock
+
+# Build output
+*.tgz
+dist/
+build/
+
+# Test and temporary artifacts
+*.log
+*.tmp
+*.bak
+*.bak-*
+*.orig
+test-*
+coverage/
+
+# Editor and OS files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# Local environment
+.env
+.env.*
