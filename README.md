@@ -1,5 +1,7 @@
 # dsh-knowledge-hub
 
+**English** | [简体中文](README.zh-CN.md)
+
 > **Derived from [`iwtown/dsh-llm-wiki`](https://github.com/iwtown/dsh-llm-wiki)**
 > (commit `4602b75e4afc2546704ca8b5e642f870eb2f0f96`, v0.10.7, MIT,
 > Copyright (c) 2026 iwtown).

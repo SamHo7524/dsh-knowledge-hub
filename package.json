@@ -15,7 +15,9 @@
     "cordis.patch.yml",
     "LICENSE",
     "THIRD_PARTY_NOTICES.md",
-    "README.md"
+    "README.md",
+    "README.zh-CN.md",
+    "CHANGELOG.md"
   ],
   "license": "MIT",
   "author": "SamBanHo",
