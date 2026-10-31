@@ -296,12 +296,57 @@ test("prompt.apply() 必须注册 knowledge_hub_status 工具", async () => {
     const { apply } = await import("../prompt.mjs");
     apply(ctx, { projectsFile: f.projectsFile });
 
-    // 注册是异步的（defineTool 惰性解析），等待一个微任务轮次
-    await new Promise((r) => setTimeout(r, 100));
-
     const names = registered.map((r) => r.name);
     assert.ok(names.includes("knowledge_hub_status"),
       "必须注册诊断工具，实际注册: " + (names.join(", ") || "(空)"));
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("工具注册必须是同步的（与 dsh-obsidian 一致），不能依赖异步解析", async () => {
+  const f = makeFixture();
+  try {
+    const registered = [];
+    const ctx = {
+      tools: { register: (def) => { registered.push(def); return () => {}; } },
+      systemPrompt: { section: () => () => {} },
+      effect: (fn) => { try { fn(); } catch { /* 忽略 */ } },
+      logger: { info: () => {}, warn: () => {} },
+      on: () => () => {},
+      agent: { session: { header: { cwd: f.wsA } } },
+    };
+    const { apply } = await import("../prompt.mjs");
+    apply(ctx, { projectsFile: f.projectsFile });
+
+    // 同步断言：apply() 返回后工具就必须已在，不等微任务
+    const names = registered.map((r) => r.name);
+    assert.ok(names.includes("knowledge_hub_status"),
+      "apply() 返回后应已同步注册，实际: " + (names.join(", ") || "(空)"));
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("工具注册必须用单参数形态（与 dsh-obsidian 一致）", async () => {
+  const f = makeFixture();
+  try {
+    const calls = [];
+    const ctx = {
+      tools: { register: (...a) => { calls.push(a); return () => {}; } },
+      systemPrompt: { section: () => () => {} },
+      effect: (fn) => { try { fn(); } catch { /* 忽略 */ } },
+      logger: { info: () => {}, warn: () => {} },
+      on: () => () => {},
+      agent: { session: { header: { cwd: f.wsA } } },
+    };
+    const { apply } = await import("../prompt.mjs");
+    apply(ctx, { projectsFile: f.projectsFile });
+
+    const call = calls.find((a) => a[0] && a[0].name === "knowledge_hub_status");
+    assert.ok(call, "必须注册该工具");
+    assert.equal(call.length, 1,
+      "register 应只传 1 个参数（实际 " + call.length + " 个），与 dsh-obsidian 一致");
   } finally {
     rmSync(f.root, { recursive: true, force: true });
   }
@@ -321,7 +366,6 @@ test("knowledge_hub_status 工具的 execute 返回诊断文本", async () => {
     };
     const { apply } = await import("../prompt.mjs");
     apply(ctx, { projectsFile: f.projectsFile });
-    await new Promise((r) => setTimeout(r, 100));
 
     const tool = registered.find((r) => r.name === "knowledge_hub_status");
     assert.ok(tool, "工具必须存在");

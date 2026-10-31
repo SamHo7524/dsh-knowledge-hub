@@ -54,19 +54,11 @@ import { spawn } from "node:child_process";
 import { loadProjects, matchProject } from "./projects-registry.mjs";
 // 诊断入口：只读收集运行状态，供 knowledge_hub_status 工具使用。
 import { collectDiagnostics, formatDiagnostics } from "./diagnostics.mjs";
-// defineTool 由 DSH 运行时提供（@deepseek-ai/dsh-tools）。测试环境没有该包，
-// 因此延迟到真正注册时再解析；拿不到就跳过工具注册，不影响 Prompt 层。
-let defineToolCached;
-async function resolveDefineTool() {
-  if (defineToolCached !== undefined) return defineToolCached;
-  try {
-    const mod = await import("@deepseek-ai/dsh-tools");
-    defineToolCached = mod.defineTool;
-  } catch {
-    defineToolCached = null;
-  }
-  return defineToolCached;
-}
+// defineTool 由 DSH 运行时提供。所有能正常注册工具的插件（dsh-obsidian、
+// dsh-github）都是静态 import，且注册发生在 apply() 同步执行期间。
+// 曾改为惰性异步 import + .then() 内注册，结果工具从未出现在会话工具表中，
+// 因此这里改回静态 import + 同步注册，不保留降级路径。
+import { defineTool } from "@deepseek-ai/dsh-tools";
 
 export const name = "dsh-llm-wiki";
 export const inject = ["systemPrompt"];
@@ -599,7 +591,9 @@ export function apply(ctx, config = {}) {
       return formatDiagnostics(d);
     };
 
-    const definition = {
+    // 同步注册，单参数，与 dsh-obsidian 的 registerTools 形态一致。
+    // 注释说明了历史教训：异步注册会导致工具不出现在会话工具表中。
+    ctx.tools.register(defineTool({
       name: "knowledge_hub_status",
       description:
         "诊断 dsh-knowledge-hub 的运行状态：注册表是否有效、当前 cwd 匹配哪个项目、" +
@@ -616,16 +610,6 @@ export function apply(ctx, config = {}) {
         render: (_args, value) => [{ type: "text", text: value }],
       },
       execute: () => buildStatusText(),
-    };
-
-    // defineTool 可用时用它规范化定义；拿不到时退回裸定义（DSH 同样接受）。
-    resolveDefineTool()
-      .then((defineTool) => {
-        const tool = typeof defineTool === "function" ? defineTool(definition) : definition;
-        try { ctx.tools.register(tool, "dsh-llm-wiki.tool.status"); } catch { /* 注册失败不影响主流程 */ }
-      })
-      .catch(() => {
-        try { ctx.tools.register(definition, "dsh-llm-wiki.tool.status"); } catch { /* 同上 */ }
-      });
+    }));
   }
 }

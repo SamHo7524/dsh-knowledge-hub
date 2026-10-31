@@ -51,6 +51,25 @@ v0.1.x 收尾版本。补齐读取隔离、增加诊断入口、明确上游共�
   the hub keeps running — coexistence never disables it. The recommendation is
   actionable (disable one entry in the profile patch) rather than a bare warning.
 
+### Fixed
+
+- **`knowledge_hub_status` never appeared in the session tool list.** The first
+  0.1.3 build registered it through a lazy `await import("@deepseek-ai/dsh-tools")`
+  resolved inside an async `.then()`, passed a second argument to
+  `ctx.tools.register`, and swallowed any error. The tool was silently absent.
+
+  Every plugin that registers tools successfully — `dsh-obsidian`, `dsh-github` —
+  uses a static `import` and registers synchronously inside `apply()` with a
+  single argument. This release matches that shape exactly and removes the
+  fallback path, so a failure surfaces instead of hiding.
+
+  Two regression tests pin the shape: one asserts the tool is registered by the
+  time `apply()` returns (no microtask wait), the other asserts `register`
+  receives exactly one argument.
+
+  For tests, a stub `node_modules/@deepseek-ai/dsh-tools` provides `defineTool`
+  at the repository root; `node_modules/` is gitignored, so it never ships.
+
 ### Changed
 
 - `READONLY_PROJECT` now blocks writes only. A `readonly` project can still be
@@ -58,13 +77,13 @@ v0.1.x 收尾版本。补齐读取隔离、增加诊断入口、明确上游共�
 
 ### Tests
 
-59 cases across four suites, all passing:
+61 cases across four suites, all passing:
 
 | Suite | Cases | Covers |
 | --- | --- | --- |
 | `obsidian-relpath.test.mjs` | 12 | relative-path write isolation (v0.1.2 regression) |
 | `read-isolation.test.mjs` | 21 | read isolation, traversal, symlink, fail-closed |
-| `diagnostics.test.mjs` | 18 | diagnostic output, honesty about unknown state, tool wiring |
+| `diagnostics.test.mjs` | 20 | diagnostic output, honesty about unknown state, tool registration shape |
 | `coexistence.test.mjs` | 8 | upstream conflict detection and responsibility assignment |
 
 ### Note
