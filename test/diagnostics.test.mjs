@@ -376,17 +376,69 @@ test("knowledge_hub_status 工具的 execute 返回诊断文本", async () => {
       effect: (fn) => { try { fn(); } catch { /* 忽略 */ } },
       logger: { info: () => {}, warn: () => {} },
       on: () => () => {},
-      agent: { session: { header: { cwd: f.wsA } } },
     };
     const { apply } = await import("../prompt.mjs");
     apply(ctx, { projectsFile: f.projectsFile });
 
     const tool = registered.find((r) => r.name === "knowledge_hub_status");
     assert.ok(tool, "工具必须存在");
-    const text = await tool.execute({});
+    // execute 的第二个参数是 exec，会话上下文从这里取（同 dsh-github 的 exec.signal 用法）
+    const text = await tool.execute({}, { agent: { session: { header: { cwd: f.wsA } } } });
     assert.equal(typeof text, "string");
     assert.ok(text.includes("注册表"), "输出必须含注册表章节");
     assert.ok(text.includes("Guard"), "输出必须含 Guard 章节");
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("execute 必须能从 exec.agent.session.header.cwd 取到 cwd（不能读 ctx.agent）", async () => {
+  const f = makeFixture();
+  try {
+    const registered = [];
+    const ctx = {
+      tools: { register: (def) => { registered.push(def); return () => {}; } },
+      systemPrompt: { section: () => () => {} },
+      effect: (fn) => { try { fn(); } catch { /* 忽略 */ } },
+      logger: { info: () => {}, warn: () => {} },
+      on: () => () => {},
+      // 故意不提供 ctx.agent：生产环境里访问未 inject 的服务会抛
+      // "cannot get property agent without inject"
+    };
+    const { apply } = await import("../prompt.mjs");
+    apply(ctx, { projectsFile: f.projectsFile });
+
+    const tool = registered.find((r) => r.name === "knowledge_hub_status");
+    assert.ok(tool, "工具必须存在");
+    const text = await tool.execute({}, { agent: { session: { header: { cwd: f.wsA } } } });
+
+    // 必须匹配到 fixture 里 wsA 对应的项目（Project A / proj-a），说明 cwd 确实来自 exec
+    assert.ok(text.includes("匹配"), "必须报告 cwd 匹配结果");
+    assert.ok(text.includes("Project A") && text.includes("proj-a"),
+      "必须匹配到 fixture 的 Project A，实际输出片段:\n" + text.slice(0, 600));
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("execute 在拿不到 exec 上下文时不得抛错，应降级并如实报告", async () => {
+  const f = makeFixture();
+  try {
+    const registered = [];
+    const ctx = {
+      tools: { register: (def) => { registered.push(def); return () => {}; } },
+      systemPrompt: { section: () => () => {} },
+      effect: (fn) => { try { fn(); } catch { /* 忽略 */ } },
+      logger: { info: () => {}, warn: () => {} },
+      on: () => () => {},
+    };
+    const { apply } = await import("../prompt.mjs");
+    apply(ctx, { projectsFile: f.projectsFile });
+
+    const tool = registered.find((r) => r.name === "knowledge_hub_status");
+    const text = await tool.execute({}, undefined);
+    assert.equal(typeof text, "string", "无 exec 时应降级返回文本而非抛错");
+    assert.ok(text.includes("注册表"), "仍应输出注册表章节");
   } finally {
     rmSync(f.root, { recursive: true, force: true });
   }

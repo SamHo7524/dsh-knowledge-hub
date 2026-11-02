@@ -576,11 +576,26 @@ export function apply(ctx, config = {}) {
   // 只读、无副作用。Guard 是否注册由 config 注入（Guard 在独立 entry 里，
   // 本 entry 无法直接查询其注册状态，因此由 profile 配置显式声明）。
   if (ctx.tools && typeof ctx.tools.register === "function") {
-    const buildStatusText = () => {
+    // cwd 只能从工具执行的 exec 参数取，不能读 ctx.agent：
+    // ctx.agent 是 Cordis 服务，未在 inject 声明时访问会抛
+    // "cannot get property agent without inject"。exec 是每个工具调用的
+    // 执行上下文，dsh-github 用 exec.signal、guard.mjs 用 exec.agent 取会话。
+    const cwdFromExec = (exec) => {
+      try {
+        const session = exec && exec.agent && exec.agent.session;
+        const cwd = session && session.header && session.header.cwd;
+        return typeof cwd === "string" && cwd.length > 0 ? cwd : "";
+      } catch {
+        return "";
+      }
+    };
+
+    const buildStatusText = (exec) => {
+      const cwd = cwdFromExec(exec);
       const d = collectDiagnostics({
         projectsFile,
-        cwd: (ctx.agent && ctx.agent.session && ctx.agent.session.header
-          && ctx.agent.session.header.cwd) || process.cwd(),
+        // 拿不到会话 cwd 时用进程 cwd 兜底，并在输出里如实体现匹配结果。
+        cwd: cwd || process.cwd(),
         guardRegistered: guardExpected === true,
         upstreamPresent: detectUpstream(),
         obsidianVaultPath: config.obsidianVaultPath ? String(config.obsidianVaultPath) : "",
@@ -612,7 +627,7 @@ export function apply(ctx, config = {}) {
         schema: { type: "string" },
         render: (_args, value) => [{ type: "text", text: value }],
       },
-      execute: () => buildStatusText(),
+      execute: (_args, exec) => buildStatusText(exec),
     }));
   }
 }
